@@ -1,12 +1,67 @@
 import streamlit as st
 import os
-# ...existing code...
-from langchain.chains import ConversationalRetrievalChain
+from langchain_community.document_loaders import PyPDFLoader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_community.vectorstores import Chroma
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain.memory import ConversationBufferMemory
 import pathlib
 
 # load_dotenv() # Not needed if using st.secrets
+
+# Function to load PDF documents
+def load_docs(directory):
+    documents = []
+    for item in pathlib.Path(directory).iterdir():
+        if item.is_file() and item.suffix == '.pdf':
+            pdf_path = str(item)
+            loader = PyPDFLoader(pdf_path)
+            documents.extend(loader.load())
+    return documents
+
+# Function to split text into chunks
+def get_text_chunks(documents):
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=10000,
+        chunk_overlap=1000
+    )
+    text_chunks = text_splitter.split_documents(documents)
+    return text_chunks
+
+# Function to create/get vector store
+def get_vector_store(text_chunks):
+    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+    vector_store = Chroma.from_documents(text_chunks, embedding=embeddings, persist_directory="./chroma_db")
+    return vector_store
+
+# Function to get a simple conversational handler using retrieval + LLM
+def get_conversational_chain(vector_store):
+    llm = ChatGoogleGenerativeAI(model="gemini-pro", temperature=0.3, google_api_key=st.secrets["gemini"]["api_key"])
+
+    def conversation(query):
+        # Use vector store direct search for compatibility with installed API
+        docs = vector_store.similarity_search(query, k=3)
+        context = "\n\n".join(doc.page_content for doc in docs)
+
+        prompt = f"""Use only the following context to answer the user's question.
+
+Context:
+{context}
+
+Question: {query}
+
+If the answer is not present in the context, say that you do not know and politely decline to answer.
+"""
+
+        response = llm.invoke(prompt)
+        answer = response.content if hasattr(response, "content") else str(response)
+
+        return {
+            "answer": answer,
+            "source_documents": docs,
+        }
+
+    return conversation
 
 st.set_page_config(page_title="RAG Chatbot with Gemini")
 st.title("RAG Chatbot with Gemini LLM")
@@ -63,7 +118,8 @@ if check_password():
         # Add user message to chat history
         st.session_state.messages.append({"role": "user", "content": prompt})
 
-        response = st.session_state.conversation({"question": prompt})
+        # our conversation handler expects a plain query string
+        response = st.session_state.conversation(prompt)
         answer = response.get("answer") or response.get("chat_history", [])[-1].content
 
         if "I don't know" in answer or "not in the provided documents" in answer:
@@ -89,44 +145,4 @@ if check_password():
 # Local .env file setup for GOOGLE_API_KEY
 # Create a .env file in the root directory with the following content:
 # GOOGLE_API_KEY="YOUR_GEMINI_API_KEY"
-
-# Function to load PDF documents
-def load_docs(directory):
-    documents = []
-    for item in pathlib.Path(directory).iterdir():
-        if item.is_file() and item.suffix == '.pdf':
-            pdf_path = str(item)
-            loader = PyPDFLoader(pdf_path)
-            documents.extend(loader.load())
-    return documents
-
-# Function to split text into chunks
-def get_text_chunks(documents):
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=10000,
-        chunk_overlap=1000
-    )
-    text_chunks = text_splitter.split_documents(documents)
-    return text_chunks
-
-# Function to create/get vector store
-def get_vector_store(text_chunks):
-    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-    vector_store = Chroma.from_documents(text_chunks, embedding=embeddings, persist_directory="./chroma_db")
-    return vector_store
-
-# Function to get conversational chain
-def get_conversational_chain(vector_store):
-    llm = ChatGoogleGenerativeAI(model="gemini-pro", temperature=0.3, google_api_key=st.secrets["gemini"]["api_key"])
-    memory = ConversationBufferMemory(
-        memory_key='chat_history',
-        return_messages=True
-    )
-    conversation_chain = ConversationalRetrievalChain.from_llm(
-        llm=llm,
-        retriever=vector_store.as_retriever(search_kwargs={"k": 3}),
-        memory=memory,
-        return_source_documents=True
-    )
-    return conversation_chain
 
