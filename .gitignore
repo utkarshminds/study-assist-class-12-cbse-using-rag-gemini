@@ -101,6 +101,7 @@ ipython_config.py
 
 # Custom additions
 secrets/
+.streamlit/
 .env
 # uv.lock
 

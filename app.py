@@ -36,7 +36,7 @@ def get_vector_store(text_chunks):
 
 # Function to get a simple conversational handler using retrieval + LLM
 def get_conversational_chain(vector_store):
-    llm = ChatGoogleGenerativeAI(model="gemini-pro", temperature=0.3, google_api_key=st.secrets["gemini"]["api_key"])
+    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.3, api_key=st.secrets["gemini"]["api_key"])
 
     def conversation(query):
         # Use vector store direct search for compatibility with installed API
